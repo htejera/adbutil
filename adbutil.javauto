@@ -1,0 +1,865 @@
+//A simple Javauto (cross platform) wrapper around Android Debug Bridge to enable multi device support.
+//ADB is a command line tool that lets you communicate with an emulator or connected Android device. 
+//You can find the adb tool in android sdk/platform-tools or Download ADB Kits.
+//
+//Preconditions: 
+//  0. Requires the Android SDK to be installed and tools directory to be in the path
+//  1. Ensure USB debugging is enabled.
+//  2. Accept an RSA key fingerprint that allows debugging through this computer.
+//
+//MIT License
+//Copyright © 2015 Oscar Henry Tejera    
+
+import java.util.Arrays; 
+import java.util.ArrayList; 
+import java.util.List;
+import java.util.Map.Entry;
+import java.util.HashMap;
+import java.util.Set;
+import java.util.Date;
+
+//#START: ADB COMMANDS
+
+//Devices status.
+global ArrayList<String> devices_status = new ArrayList<String>();
+devices_status.add("device");
+devices_status.add("offline");
+devices_status.add("unauthorized");
+devices_status.add("unknown");
+
+struct Device {
+    String serial;
+    String status;
+    String name;
+    String version;
+    String ip;
+    String sdk;
+    String model;
+}
+
+//Get all connected devices.
+//@return The devices command output.
+func String adb_devices(){
+     return adb_execution("devices");
+}
+
+//Gets a list with all connected devices and their states.
+//@return A list of devices.
+func List<Device> adb_getDevicesStatus(){
+    List<Device> devices = new ArrayList<Device>();   
+    String output = adb_devices();
+    List<String> lines = Arrays.asList(output.split("\\r?\\n"));   
+
+    if(lines.size() > 0){
+       int limit = (lines.get(0).contains("daemon not running"))? 3:1;
+
+       if(lines.size() > limit){
+            for(int i = limit; i < lines.size(); i++){
+                String device = lines.get(i);            
+                print(device);
+                for(String status: devices_status){
+                   if(device.contains(status)) {
+                        Device deviceToInsert = new Device();
+                        deviceToInsert.serial = device.replace(status,"").trim();
+                        deviceToInsert.status = status;
+                        if(status.equals("device")){
+                            deviceToInsert.name = adb_getDeviceName(deviceToInsert.serial);
+                            deviceToInsert.version = adb_getDeviceVersion(deviceToInsert.serial);
+                            deviceToInsert.ip = adb_getIPWlan0(deviceToInsert.serial);
+                            deviceToInsert.sdk = adb_getSDKVersion(deviceToInsert.serial);
+                            deviceToInsert.model = adb_getDeviceModel(deviceToInsert.serial);
+                        }
+                        devices.add(deviceToInsert);                        
+                    }
+                }
+            }
+        }
+    }  
+
+    if(devices.size() == 0) {
+        print("No connected Devices.");
+    }
+
+    return devices; 
+}       
+
+//Execute an ADB command.
+//@param command - The command to execute.
+//@return  The output of the command.
+func String adb_execution(String command) {
+        String executeThis = "adb %s" % (command);
+        if(verbose)
+            print("Execute: [%s]" % (executeThis));
+       
+        if(SYSTEM_OS.toLowerCase().contains("windows")) {
+            return exec("cmd /c %s" % (executeThis));
+        } else {
+            return exec(executeThis);
+        }      
+}
+
+//Execute shell command.
+//@param serial - The serial device id.
+//@param shell  - The command to be passed to the shell command.
+//@return  The output of the command.
+func String adb_execute_shell(String serial, String shell){
+    return adb_execution("-s %s shell %s " % (serial,shell));
+}
+
+//Gets all the device packages.
+//@param serial - The serial device id.
+//@param A list with all device packages.
+func List<String> adb_listPackages(String serial){
+     List<String> packages = new ArrayList<String>();
+     String output = adb_execute_shell(serial, "pm list packages");
+     String lines[] = output.split("\\r?\\n");
+    
+     if(lines.length > 0){
+        for(String pack : lines)
+             packages.add(pack);
+     }
+     return packages;    
+}
+
+//Gets the adb version.
+//@return The adb version.
+func String adb_version(){
+    return adb_execution("version");
+}
+
+//Download a specified file from an emulator/device to your computer.
+//@param serial - The serial device id.
+//@param remoteFile - The full path to the (remote) file.
+//@param localFile - the fully path to the destination (local) file.
+func void adb_pull(String serial, String remoteFile, String localFile){
+     adb_execution("-s %s pull %s %s" % (serial,remoteFile, localFile));
+}
+
+//Upload a specified file from your computer to an emulator/device.
+//@param serial - The serial device id.
+//@param remoteFile - The full path to the (local) file.
+//@param localFile - the fully path to the destination (remote) file.
+func void adb_push(String serial, String localFile, String remoteFile){
+     adb_execution("-s %s push %s %s" % (serial,localFile, remoteFile));
+}
+
+//Delete a file.
+//@param serial - The serial device id.
+//@param remoteFile - The full path to the (remote) file.
+func void adb_removeFile(String serial, String remoteFile){
+    adb_execute_shell(serial, "rm %s " % (remoteFile));
+}
+
+//Gets the device android version.
+//@param serial - The serial device id.
+//@return The android version (format: build.version.release).
+func String adb_getDeviceVersion(String serial){
+    return adb_execute_shell(serial, "getprop ro.build.version.release");
+}
+
+//Gets the device name.
+//@param serial - The serial device id.
+//@return The device name.
+func String adb_getDeviceName(String serial){
+    return adb_execute_shell(serial, "getprop ro.product.name");
+}
+
+//Gets the device manufacturer.
+//@param serial - The serial device id.
+//@return The device manufacturer.
+func String adb_getDeviceManufacturer(String serial){
+    return adb_execute_shell(serial, "getprop ro.product.manufacturer");
+}
+
+//Gets the device IP for wlan0.
+//@param serial - The serial device id.
+//@return The device IP.
+func String adb_getIPWlan0(String serial){
+    return  adb_execute_shell(serial, "getprop dhcp.wlan0.ipaddress");
+}
+
+//Gets the user-visible SDK version of the framework.
+//@param serial - The serial device id.
+//@return The SDK version.
+func String adb_getSDKVersion(String serial){
+    return  adb_execute_shell(serial, "getprop ro.build.version.sdk");
+}
+
+//Gets the device model.
+//@param serial - The serial device id.
+//@return The device model.
+func String adb_getDeviceModel(String serial){
+    return  adb_execute_shell(serial, "getprop ro.product.model");
+}
+
+//Execute dumpsys command dumps the state of the system’s devices.
+//@param serial - The serial device id.
+//@param service - The system service that you use with dumpsys.
+//@return The output of the command dumpsys.
+func String adb_dumpsys(String serial, String service){
+    return adb_execute_shell(serial, "dumpsys %s" % (service));
+}
+
+//Pushes an Android application (specified as a full path to an .apk file) to an emulator/device.
+//@param serial - The serial device id.
+//@param mode - Can be: -l:test.apk forward lock application
+//                      -r:test.apk replace existing application
+//                      -t:test.apk allow test packages
+//                      -s:test.apk install application on sdcard
+//                      -d:test.apk allow version code downgrade
+//                      -p:test.apk partial application install
+//@param apk - The full path to the apk.
+//@return The install command output.
+func String adb_install(String serial,String mode, String apk){
+    return adb_execution("-s %s install %s %s " % (serial, mode, apk));
+}
+
+//Removes a package from the emulator/device.
+//@param serial - The serial device id.
+//@param mode - Can be: -k: Keep the data and cache directories around after package removal.
+//@param pack - The full path to the package.
+//@return The uninstall command output.
+func String adb_uninstall(String serial,String mode, String pack){
+    return adb_execution("-s %s uninstall %s %s " % (serial, mode, pack));
+}
+
+//Sends a KeyEvent.
+//@param serial - The serial device id.
+//@param keyCode - The code of the KeyEvent to send.
+//@see http://developer.android.com/reference/android/view/KeyEvent.html
+func void adb_sendKeyEvent(String serial, String keyCode){
+    adb_execute_shell(serial, "input keyevent %s" % (keyCode));
+}
+
+//Terminates the adb server process.
+//Kill the server if it is running. 
+func void adb_stopServer(){
+    adb_execution("kill-server");
+}
+
+//Reboot the device
+//@param serial - The serial device id.
+func void adb_reboot(String serial){
+    adb_execution("-s %s reboot" %(serial));
+}
+
+//Start an activity
+//@param serial - The serial device id.
+//@param activity - The activity name.
+func String adb_startActivity(String serial, String activity){
+    return adb_execute_shell(serial, "am start -a android.intent.action.MAIN -n %s" % (activity));
+}
+
+//Gets the APK path on the device’s filesystem given the app package.
+//@param serial - The serial device id.
+//@param activity - The package name.
+//@return The path of the APK file on the device’s filesystem or an empty String if the package does not exist.
+func String adb_getAPKPath(String serial, String pack){
+    String path = adb_execute_shell(serial, "pm path %s" % (pack));   
+    if(path.contains("package:")){
+        return path.replaceAll("package:","");
+    }
+    return "";
+}
+
+//Force stop everything associated with package name.
+//@param serial - The serial device id.
+//@param activity - The package name.
+func void adb_forceStop(String serial, String pack){
+     adb_execute_shell(serial, "am force-stop %s" % (pack));
+}
+
+//Deletes all data associated with a given package.
+//@param serial - The serial device id.
+//@param activity - The package name.
+func void adb_clearPackage(String serial, String pack){
+     adb_execute_shell(serial, "pm clear %s" % (pack));       
+}
+
+//Take a screenshot and save to a PNG file.
+//@param serial - The serial device id.
+//@param localPath - The fully path to the destination (local) file.
+func void adb_getScreenshot(String serial, String localPath){
+        String remoteScreenshot = "/sdcard/screen.png";    
+        adb_execute_shell(serial,"screencap -p %s " % (remoteScreenshot));   
+        adb_pull(serial, remoteScreenshot, localPath);
+        adb_removeFile(serial, remoteScreenshot);
+}
+
+//Recording a device screen devices running Android 4.4 (API level 19) and higher.
+//The utility records screen activity to an MPEG-4 file.
+//@param serial - The serial device id.
+//@param localPath - The fully path to the destination (local) video file (without the file extension).
+//@param size -  The video size, for example: 1280x720.
+//@param bitRate - The video bit rate for the video, in megabits per second, for example: 6000000.
+//@param timelimit - The maximum recording time, in seconds. The default and maximum value is 180 (3 minutes).
+func void adb_screenRecord(String serial, String localPath, String size, String bitRate, String timelimit){
+        String remoteVideo = "/sdcard/screenrecord.mp4";    
+        String cmd = "screenrecord %s --size %s --bit-rate %s --time-limit %s" % (remoteVideo, size, bitRate, timelimit);
+
+        if(adb_getDeviceVersion(serial).contains("4.4")){
+                adb_execute_shell(serial, cmd);   
+                adb_pull(serial, remoteVideo, "%s.mp4" % (localPath));
+                adb_removeFile(serial, remoteVideo);
+        } else {
+            print("Recording a device screen devices running Android 4.4 (API level 19) and higher");
+        }
+}
+
+//END ADB COMMANDS
+
+//START UTILS
+
+//Compressed CSS for the HTML report.
+//Based in Simple Little Table by Orman Clark
+//@see http://johnsardine.com/
+global String css = "table a:link{color:#666;font-weight:700;text-decoration:none}table a:visited{color:#999;font-weight:700;" +
+                    "text-decoration:none}table a:active,table a:hover{color:#bd5a35;text-decoration:underline}" +
+                    "table{font-family:Arial,Helvetica,sans-serif;color:#666;font-size:12px;text-shadow:1px 1px 0 #fff;background:#eaebec;" +
+                    "margin:20px;border:#ccc 1px solid;-moz-border-radius:3px;-webkit-border-radius:3px;border-radius:3px;-moz-box-shadow:0 1px 2px " +
+                    "#d1d1d1;-webkit-box-shadow:0 1px 2px #d1d1d1;box-shadow:0 1px 2px #d1d1d1}table th{padding:21px 25px 22px;border-top:1px solid " +
+                    "#fafafa;border-bottom:1px solid #e0e0e0;background:#ededed;background:-webkit-gradient(linear,left top,left bottom,from(#ededed)," +
+                    "to(#ebebeb));background:-moz-linear-gradient(top,#ededed,#ebebeb)}table th:first-child{text-align:left;padding-left:20px}table tr:"+
+                    "first-child th:first-child{-moz-border-radius-topleft:3px;-webkit-border-top-left-radius:3px;border-top-left-radius:3px}table " +
+                    "tr:first-child th:last-child{-moz-border-radius-topright:3px;-webkit-border-top-right-radius:3px;border-top-right-radius:3px}table " +
+                    "tr{text-align:center;padding-left:20px}table td:first-child{text-align:left;padding-left:20px;border-left:0}table td{padding:18px;border-top:1px solid " + 
+                    "#fff;border-bottom:1px solid #e0e0e0;border-left:1px solid #e0e0e0;background:#fafafa;background:-webkit-gradient(linear,left top,left bottom,from(#fbfbfb),to(#fafafa));" +
+                    "background:-moz-linear-gradient(top,#fbfbfb,#fafafa)}table tr.even td{background:#f6f6f6;background:-webkit-gradient(linear,left top,left bottom,from(#f8f8f8),to(#f6f6f6));" +
+                    "background:-moz-linear-gradient(top,#f8f8f8,#f6f6f6)}table tr:last-child td{border-bottom:0}table tr:last-child td:first-child{-moz-border-radius-bottomleft:3px;-webkit-border-bottom-left-radius:3px;" +
+                    "border-bottom-left-radius:3px}table tr:last-child td:last-child{-moz-border-radius-bottomright:3px;-webkit-border-bottom-right-radius:3px;border-bottom-right-radius:3px}table " +
+                    "tr:hover td{background:#f2f2f2;background:-webkit-gradient(linear,left top,left bottom,from(#f2f2f2),to(#f0f0f0));background:-moz-linear-gradient(top,#f2f2f2,#f0f0f0)}";
+
+
+//Generates a HTML report with all connected devices.
+//@param reportPath - Path of report (without the last '/').
+//@param resportName - Name of report (without the file extension).
+func void util_deviceStatusReport(String reportPath, String reportName){
+     String fullPath = "%s/%s.html" % (reportPath,reportName);
+     fileCreate(fullPath);
+     StringBuilder report = new StringBuilder();
+     report.append("<html>")
+           .append("<meta http-equiv='refresh' content='10'>")
+           .append("<head>")
+           .append("<style type='text/css'>%s</style>" % (css))               
+           .append("</head>")
+           .append("<body>")
+           .append("<div align='center'>")
+           .append("<h2>Device status</h2>")
+           .append("<table cellspacing='0'>")
+           .append("<tbody>")
+           .append("<tr>")
+           .append("<th>Serial</th>")
+           .append("<th>Status</th>")
+           .append("<th>Name</th>")
+           .append("<th>Model</th>")
+           .append("<th>IP Address</th>")
+           .append("<th>Version</th>")
+           .append("<th>SDK</th>")
+           .append("<th>Screenshot</th>")
+           .append("<tr class='even'>");
+                                                           
+     List<Device> devices = adb_getDevicesStatus();
+
+     if(devices.size() > 0){     
+         print("[REPORT] Generating device status report...");
+
+         for (Device device : devices) {
+             report.append("<tr class='even'>")
+                   .append("<td><strong>%s</strong></td>" % (device.serial));
+       
+             if(device.status.equals("device")){
+                   report.append("<td style='color:green'><strong>%s</strong></td>" % (device.status))
+                         .append("<td>%s</td>" % (device.name))
+                         .append("<td>%s</td>" % (device.model))
+                         .append("<td>%s</td>" % (device.ip))
+                         .append("<td>%s</td>" % (device.version))
+                         .append("<td>%s</td>" % (device.sdk));
+                         
+                String screen = "%s/%s.png" % (reportPath, device.serial);
+                if(util_isDeviceSleep(device.serial))
+                        adb_sendKeyEvent(device.serial, "26");
+                 adb_getScreenshot(device.serial, screen);
+                 report.append("<td><a href='%s.png'>Screenshot</a></td>" % (device.serial, screen));
+            } else {
+                 report.append("<td style='color:red'><strong>%s</strong></td>" % (device.status))
+                       .append("<td>N/A</td>")
+                       .append("<td>N/A</td>")
+                       .append("<td>N/A</td>")
+                       .append("<td>N/A</td>")
+                       .append("<td>N/A</td>")
+                       .append("<td>N/A</td>");       
+            }
+            report.append("</tr>");
+         }             
+         report.append("</tbody>")
+               .append("</table>")
+               .append("<p>%s</p>" % (new Date().toString()))
+               .append("</div>")
+               .append("</body>")
+               .append("</html>");
+         fileWrite(fullPath,report.toString());
+        print("[REPORT] done!");
+    }
+
+}
+
+//Check if the given device is sleep.
+//@param serial - The serial device id.
+//@return true if the device is sleep, otherwise false.
+func boolean util_isDeviceSleep(String serial){
+        String dump = adb_dumpsys(serial, "power");
+        if(dump.contains("mScreenOn=true")){
+            return false;
+        }
+        return true;
+}
+
+//Find a package on a given device.
+//@param serial - The serial device id.
+//@param pack - The The package to search for.
+//@return true if package found, otherwise false.
+func boolean util_findPackage(String serial, String pack){
+    List<String> packages = adb_listPackages(serial);
+    if(packages.size() > 0){
+        if(packages.toString().matches(".*\\b%s\\b.*" %(pack)))
+            return true;
+    }
+    return false;
+}
+
+
+//Removes the description of parameter.
+//@param param - The parameter to clean.
+//@return The parameter without the description.(Example: given -t(My parameter description), this return: -t).
+func String cleanParameter(String param){
+   return param.replaceAll("\\(.*?\\)","");
+}
+
+//Validate the supplied command-line arguments for the given task.
+//@param task - The task name.
+//@param args - Contains the supplied command-line arguments. 
+func void validate_taskParam(String task,String args[]){
+    String[] options = tasks.get(task).split(";");
+
+    for(String option : options){
+        if(!isFlagged(args, cleanParameter(option))){
+             printHelp();  
+        }
+    }
+}
+
+//Gets a list of the connected devices (with status = 'device') given a parameter.
+//@param serial - The parameter can be:  
+//                  1) all - Mean that we need all the connected devices 
+//                  2) A list of devices serial id, e.g: serial1,serial2,serial2 
+//                  3) An serial id.
+//@return A list of the connected devices (with status = 'device')
+func List<String> validate_serialDevices(String serial){
+    List<Device> devices = adb_getDevicesStatus();    
+    if(devices.size() == 0)
+        System.exit(1);   
+
+    List<String> target = new ArrayList<String>();
+
+    if(serial.equals("all")){
+        for(Device device : devices){
+            if(device.status.equals("device")){
+                target.add(device.serial);
+            }
+       }
+    } else if(serial.contains(",")){        
+        List<String> ids = Arrays.asList(serial.split(","));        
+           for(String id : ids){
+            for(Device device : devices){
+                 if(device.status.equals("device") && device.serial.equals(id)){
+                    target.add(id);
+                }
+            }
+        }
+    } else {
+        for(Device device : devices){
+            if(device.status.equals("device") && device.serial.equals(serial)){
+                target.add(serial);
+                 break;
+            }
+       }
+    }
+
+    if(target.size() == 0){
+        print("The device [%s] is not connected." % (serial));
+        System.exit(1); 
+    }
+    return target;
+}
+
+//END UTILS
+
+//START TASKS
+
+//Task list
+global HashMap<String,String> tasks = new HashMap<String,String>();
+tasks.put("deviceStatus", "-rp(Path of report without the last '/');-rn(Name of report without the file extension);-t(Inserts a fixed delay between the report generation)");
+tasks.put("install","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-a(Path to apk file)");
+tasks.put("uninstall","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-p(Package to delete)");
+tasks.put("reboot","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma])");
+tasks.put("startActivity","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-a(Activity name)");
+tasks.put("findPackage","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-p(Package)");
+tasks.put("getIP","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);");
+tasks.put("getAPK","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-p(Package);-f(Path to local APK destination)");
+tasks.put("sendKeyEvent","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-e(KeyEvent code)");
+tasks.put("screencap","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-p(Path to local screenshot destination)");
+tasks.put("wakeup","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma])");
+tasks.put("clearPackage","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-p(Package)");
+tasks.put("forceStopPackage","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-p(Package)");
+tasks.put("directCommand","-s(Device serial id.It can be: 'all',a serial id or a list of ids[separated with comma]);-c(adb command to execute e.g:'shell ls')");
+
+global String msgSigint = "(Press Ctrl+C to quit)";
+
+//Tasks monitoring the devices status.
+//@param args - Contains the supplied command-line arguments.
+func void task_deviceStatus(String[] args){
+    validate_taskParam("deviceStatus", args);
+
+    do {
+         print("[TASK] deviceStatus %s" % (msgSigint));
+         util_deviceStatusReport(getFlaggedArg(args, "-rp"), getFlaggedArg(args, "-rn"));
+         sleep(toInt(getFlaggedArg(args, "-t")));
+    } while(true);
+}
+
+//Install an apk file on the given device.
+//@param args - Contains the supplied command-line arguments.
+func void task_install(String[] args){
+    validate_taskParam("install", args);
+    print("[TASK] install %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String apk = getFlaggedArg(args, "-a");
+
+    if(!fileExists(apk)){
+        print("The apk [%s] does not exist." % (apk));
+        System.exit(1);
+    }
+        
+    List<String> target = validate_serialDevices(serial);
+
+    for(String id : target)
+           print(adb_install(id, "-r",apk));
+    print("[TASK] done");       
+}
+
+//Uninstall an package on the given device.
+//@param args - Contains the supplied command-line arguments.
+func void task_uninstall(String[] args){
+    validate_taskParam("uninstall", args);
+    print("[TASK] uninstall %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String pack = getFlaggedArg(args, "-p");
+
+    List<String> target = validate_serialDevices(serial);
+
+    for(String id : target)
+           print(adb_uninstall(id, "", pack));
+    print("[TASK] done");       
+}
+
+//Reboot the given device.
+//@param args - Contains the supplied command-line arguments.
+func void task_reboot(String[] args){
+    validate_taskParam("reboot", args);
+    print("[TASK] reboot %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+
+    List<String> target = validate_serialDevices(serial);
+
+    for(String id : target)
+           adb_reboot(id);
+    print("[TASK] done");       
+}
+
+//Start an activity.
+//@param args - Contains the supplied command-line arguments.
+func void task_startActivity(String[] args){
+    validate_taskParam("startActivity", args);
+    print("[TASK] startActivity %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String activity = getFlaggedArg(args, "-a");
+
+    List<String> target = validate_serialDevices(serial);
+    
+    for(String id : target)
+           print(adb_startActivity(id, activity));
+    print("[TASK] done");       
+}
+
+//Find a package on a given device.
+//@param args - Contains the supplied command-line arguments.
+func void task_findPackage(String[] args){
+    validate_taskParam("findPackage", args);
+    print("[TASK] findPackage %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String pack = getFlaggedArg(args, "-p");
+
+    List<String> target = validate_serialDevices(serial);
+    print("Device\t\tPackage\t\tFound");
+    for(String id : target){
+        print("%s\t%s\t%s" % (id, pack,toString(util_findPackage(id, pack))));            
+    }
+    print("[TASK] done");
+}
+
+//Gets the device IP (wlan0 ).
+//@param args - Contains the supplied command-line arguments.
+func void task_getIP(String[] args){
+    validate_taskParam("getIP", args);
+    print("[TASK] getIP %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    List<String> target = validate_serialDevices(serial);
+    
+    print("Device\t\tIP (wlan0)");
+    for(String id : target){
+        print("%s\t%s" % (id, adb_getIPWlan0(id)));            
+    }
+    print("[TASK] done");
+}
+
+//Gets the APK given the app package.
+//@param args - Contains the supplied command-line arguments.
+func void task_getAPK(String[] args){
+    validate_taskParam("getAPK", args);
+    print("[TASK] getAPK %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String pack = getFlaggedArg(args, "-p");
+    String localPath = getFlaggedArg(args, "-f");
+
+    if(!isDirectory(localPath)){
+        print("The -f [%s] parameter should be a valid directory.");
+        System.exit(1);
+    }
+
+    List<String> target = validate_serialDevices(serial);
+    
+    print("Device\t\tPackage\t\tRemote path\t\tLocal APK");
+    for(String id : target){
+        String remoteFile = adb_getAPKPath(id, pack);
+        String localFile  = "%s/%s.%s.apk" % (localPath, pack, id);
+
+        if(!remoteFile.isEmpty()){  
+            adb_pull(id,remoteFile,localFile);      
+        }else{
+            remoteFile = "The [%s] package does not exist on the device." % (pack);
+        }
+  
+        print("%s\t%s\t%s\t%s" % (id, pack, remoteFile, localFile));            
+    }
+    print("[TASK] done");
+}
+
+//Sends a KeyEvent.
+//@param args - Contains the supplied command-line arguments.
+//@see http://developer.android.com/reference/android/view/KeyEvent.html
+func void task_sendKeyEvent(String[] args){
+    validate_taskParam("sendKeyEvent", args);
+    print("[TASK] sendKeyEvent %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String code = getFlaggedArg(args, "-e");
+ 
+    List<String> target = validate_serialDevices(serial);
+
+    print("Device\t\tKeyEvent");
+    for(String id : target){
+        print("%s\t%s" %(id, code));
+        adb_sendKeyEvent(id, code);
+    }               
+    print("[TASK] done");
+}
+
+//Gets a device screenshot.
+//@param args - Contains the supplied command-line arguments.
+func void task_screencap(String[] args){
+    validate_taskParam("screencap", args);
+    print("[TASK] screencap %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String localPath = getFlaggedArg(args, "-p");
+
+    if(!isDirectory(localPath)){
+        print("The -p [%s] parameter should be a valid directory.");
+        System.exit(1);
+    }
+ 
+    List<String> target = validate_serialDevices(serial);
+
+    print("Device\t\tScreenshot local path");
+    for(String id : target){        
+        String screen = "%s/%s.png" % (localPath, id);
+        adb_getScreenshot(id, screen);
+        print("%s\t%s" %(id, screen));
+    }   
+    print("[TASK] done");
+}
+
+//Wake up.
+//@param args - Contains the supplied command-line arguments.
+func void task_wakeup(String[] args){
+    validate_taskParam("wakeup", args);
+    print("[TASK] wakeup %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    List<String> target = validate_serialDevices(serial);
+
+    for(String id : target){        
+        if(util_isDeviceSleep(id))
+            adb_sendKeyEvent(id, "26");
+    }   
+    print("[TASK] done");    
+}
+
+//Deletes all data associated with a given package (clearing app data, cache).
+//@param args - Contains the supplied command-line arguments.
+func void task_clearPackage(String[] args){
+    validate_taskParam("clearPackage", args);
+    print("[TASK] clearPackage %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String pack = getFlaggedArg(args, "-p");
+    List<String> target = validate_serialDevices(serial);
+
+    for(String id : target){        
+        adb_clearPackage(id, pack);
+    }   
+    print("[TASK] done");     
+}
+
+//Force stop everything associated with package name.
+//@param args - Contains the supplied command-line arguments.
+func void task_forceStopPackage(String[] args){
+    validate_taskParam("forceStopPackage", args);
+    print("[TASK] forceStopPackage %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String pack = getFlaggedArg(args, "-p");
+    List<String> target = validate_serialDevices(serial);
+
+    for(String id : target){        
+        adb_forceStop(id, pack);
+    }   
+    print("[TASK] done");   
+}
+
+//Executes a given adb command.
+//@param args - Contains the supplied command-line arguments.
+func void task_directCommand(String[] args){
+    validate_taskParam("directCommand", args);
+    print("[TASK] directCommand %s" % (msgSigint));
+
+    String serial = getFlaggedArg(args, "-s");
+    String command = getFlaggedArg(args, "-c");
+    List<String> target = validate_serialDevices(serial);
+    
+    for(String id : target){      
+        print(adb_execution("-s %s %s" % (id, command)));
+    }   
+    print("[TASK] done");
+}
+
+//END TASKS
+
+
+//START MAIN
+
+//Check program arguments.
+if(args.length  == 0 || !isFlagged(args, "-task")){
+     printHelp();  
+}
+
+global boolean verbose = (isFlagged(args, "-v"))?true:false;
+
+switch (getFlaggedArg(args, "-task")) {
+    case "deviceStatus":
+        task_deviceStatus(args);
+        break;
+ 
+    case "install":
+        task_install(args);
+        break;
+
+    case "uninstall":
+        task_uninstall(args);
+        break;
+
+    case "reboot":
+        task_reboot(args);
+        break;
+
+    case "startActivity":
+        task_startActivity(args);
+        break;        
+
+    case "findPackage":
+        task_findPackage(args);
+        break;     
+
+    case "getIP":
+        task_getIP(args);
+        break;    
+
+    case "getAPK":
+        task_getAPK(args);
+        break;      
+
+    case "sendKeyEvent":
+        task_sendKeyEvent(args);
+        break;    
+
+    case "screencap":
+        task_screencap(args);
+        break;  
+ 
+     case "wakeup":
+        task_wakeup(args);
+        break;     
+
+     case "clearPackage":
+        task_clearPackage(args);
+        break;   
+
+     case "forceStopPackage":
+        task_forceStopPackage(args);
+        break; 
+        
+     case "directCommand":
+        task_directCommand(args);
+        break; 
+
+                  
+    default:
+        print("Unsupported task [%s]\n" % (getFlaggedArg(args, "-task")));
+        printTasks();  
+        System.exit(1);   
+}
+
+// Prints program help and exit.
+func void printHelp(){
+     print("Usage: adbutil.jar -task (Task name) [Task parameters] -v (Increment the verbosity level)");
+     print("Example: java -jar adbutil.jar -task deviceStatus -rp C:/my/path/to/report -rn MyReportName -t 20000\n");
+     printTasks();
+     System.exit(1);
+} 
+
+// Prints the available tasks.
+func void printTasks(){
+     print("Available Tasks");
+     for (Entry<String,String> task : tasks.entrySet()) {
+            print("\n-> Task: %s \n-> Parameters:  %s" % (task.getKey(),task.getValue().replace(";","\n\t\t")));
+     }
+}
+
+//END MAIN
