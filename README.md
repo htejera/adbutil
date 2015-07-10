@@ -1,5 +1,5 @@
 # adbutil
-A simple Javauto (cross platform) wrapper around Android Debug Bridge to enable multi device support.
+A simple [Javauto](https://github.com/matthewdowney/javauto)  (cross platform) wrapper around Android Debug Bridge to enable multi device support.
 
 * **adbutil** is an adb replacement leveraging some nice to haves such as bulk install/uninstall.
 * **adbutil** is a command line tool that speeds up your day to day android development.
